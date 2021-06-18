@@ -14,11 +14,13 @@ use std::panic;
 use std::time::{SystemTime};
 use zcash_primitives::zip32::{DiversifierIndex, DiversifierKey, ChildIndex, ExtendedSpendingKey, ExtendedFullViewingKey};
 
+use bip39::{Language, Mnemonic};
+
 /// A trait for converting a [u8] to base58 encoded string.
 pub trait ToBase58Check {
     /// Converts a value of `self` to a base58 value, returning the owned string.
-    /// The version is a coin-specific prefix that is added. 
-    /// The suffix is any bytes that we want to add at the end (like the "iscompressed" flag for 
+    /// The version is a coin-specific prefix that is added.
+    /// The suffix is any bytes that we want to add at the end (like the "iscompressed" flag for
     /// Secret key encoding)
     fn to_base58check(&self, version: &[u8], suffix: &[u8]) -> String;
 }
@@ -29,8 +31,8 @@ impl ToBase58Check for [u8] {
         payload.extend_from_slice(version);
         payload.extend_from_slice(self);
         payload.extend_from_slice(suffix);
-        
-        let mut checksum = double_sha256(&payload);
+
+        let checksum = double_sha256(&payload);
         payload.append(&mut checksum[..4].to_vec());
         payload.to_base58()
     }
@@ -44,7 +46,7 @@ pub fn double_sha256(payload: &[u8]) -> Vec<u8> {
 }
 
 /// Parameters used to generate addresses and private keys. Look in chainparams.cpp (in zcashd/src)
-/// to get these values. 
+/// to get these values.
 /// Usually these will be different for testnet and for mainnet.
 pub struct CoinParams {
     pub zaddress_prefix : String,
@@ -58,7 +60,7 @@ pub fn params() -> CoinParams {
         zaddress_prefix  : "zs".to_string(),
         zsecret_prefix   : "secret-extended-key-main".to_string(),
         zviewkey_prefix  : "zxviews".to_string(),
-        cointype         : 133
+        cointype         : 141
     }
 }
 
@@ -109,7 +111,23 @@ fn encode_address(spk: &ExtendedSpendingKey) -> String {
     addr.pk_d.write(v.get_mut(11..).unwrap()).expect("Cannot write!");
     let checked_data: Vec<u5> = v.to_base32();
     let encoded : String = Bech32::new(params().zaddress_prefix.into(), checked_data).expect("bech32 failed").to_string();
-    
+
+    return encoded;
+}
+
+fn encode_diversified_address(spk: &ExtendedSpendingKey, d: &[u8; 11] ) -> String {
+
+    // Address is encoded as a bech32 string
+    let mut v = vec![0; 43];
+    let diversifier = DiversifierIndex(*d);
+    let extfvk = ExtendedFullViewingKey::from(spk);
+    let (_d, addr) = extfvk.address(diversifier).expect("Cannot get result");
+
+    v.get_mut(..11).unwrap().copy_from_slice(&addr.diversifier.0);
+    addr.pk_d.write(v.get_mut(11..).unwrap()).expect("Cannot write!");
+    let checked_data: Vec<u5> = v.to_base32();
+    let encoded : String = Bech32::new(params().zaddress_prefix.into(), checked_data).expect("bech32 failed").to_string();
+
     return encoded;
 }
 
@@ -125,7 +143,7 @@ fn encode_privatekey(spk: &ExtendedSpendingKey) -> String {
 
 /// A single thread that grinds through the Diversifiers to find the defualt key that matches the prefix
 pub fn vanity_thread(entropy: &[u8], prefix: String, tx: mpsc::Sender<String>, please_stop: Arc<AtomicBool>) {
-    
+
     let mut seed: [u8; 32] = [0; 32];
     seed.copy_from_slice(&entropy[0..32]);
 
@@ -156,21 +174,21 @@ pub fn vanity_thread(entropy: &[u8], prefix: String, tx: mpsc::Sender<String>, p
             }
         }
 
-        if isequal { 
+        if isequal {
             let len = spkv.len();
             spkv[(len-32)..len].copy_from_slice(&dk.0[0..32]);
             let spk = ExtendedSpendingKey::read(&spkv[..]).unwrap();
 
-            
+
             let encoded = encode_address(&spk);
             let encoded_pk = encode_privatekey(&spk);
-            
+
             let wallet = array!{object!{
                 "num"           => 0,
                 "address"       => encoded,
                 "private_key"   => encoded_pk,
                 "type"          => "zaddr"}};
-            
+
             tx.send(json::stringify_pretty(wallet, 2)).unwrap();
             return;
         }
@@ -224,8 +242,8 @@ pub fn generate_vanity_wallet(num_threads: u32, prefix: String) -> Result<String
     };
 
     // Get 32 bytes of system entropy
-    let mut system_rng = ChaChaRng::from_entropy();    
-    
+    let mut system_rng = ChaChaRng::from_entropy();
+
     let (tx, rx) = mpsc::channel();
     let please_stop = Arc::new(AtomicBool::new(false));
 
@@ -235,16 +253,16 @@ pub fn generate_vanity_wallet(num_threads: u32, prefix: String) -> Result<String
         let prefix_local = prefix.clone();
         let tx_local = mpsc::Sender::clone(&tx);
         let ps_local = please_stop.clone();
-    
+
         let mut entropy: [u8; 32] = [0; 32];
         system_rng.fill(&mut entropy);
-    
+
         let handle = thread::spawn(move || {
             vanity_thread(&entropy, prefix_local, tx_local, ps_local);
         });
         handles.push(handle);
     }
-    
+
     let mut processed: u64   = 0;
     let now = SystemTime::now();
 
@@ -259,7 +277,7 @@ pub fn generate_vanity_wallet(num_threads: u32, prefix: String) -> Result<String
             processed = processed + 5000;
             let timeelapsed = now.elapsed().unwrap().as_secs() + 1; // Add one second to prevent any divide by zero problems.
 
-            let rate = processed / timeelapsed;            
+            let rate = processed / timeelapsed;
             let expected_secs = expected_combinations / (rate as f64);
 
             let (s, d) = pretty_duration(expected_secs);
@@ -273,20 +291,20 @@ pub fn generate_vanity_wallet(num_threads: u32, prefix: String) -> Result<String
 
             please_stop.store(true, Ordering::Relaxed);
             break;
-        } 
+        }
     }
 
     for handle in handles {
         handle.join().unwrap();
-    }    
+    }
 
     return Ok(wallet);
 }
 
-/// Generate a series of `count` addresses and private keys. 
-pub fn generate_wallet(nohd: bool, count: u32, user_entropy: &[u8]) -> String {        
+/// Generate a series of `count` addresses and private keys.
+pub fn generate_wallet(nohd: bool, count: u32, user_entropy: &[u8], coin_type: Option<u32>, nobip39: bool) -> String {
     // Get 32 bytes of system entropy
-    let mut system_entropy:[u8; 32] = [0; 32]; 
+    let mut system_entropy:[u8; 32] = [0; 32];
     #[cfg(feature = "systemrand")]
     {
         let result = panic::catch_unwind(|| {
@@ -301,81 +319,175 @@ pub fn generate_wallet(nohd: bool, count: u32, user_entropy: &[u8]) -> String {
         system_rng.fill(&mut system_entropy);
     }
 
-    // Add in user entropy to the system entropy, and produce a 32 byte hash... 
+    // Add in user entropy to the system entropy, and produce a 32 byte hash...
     let mut state = sha2::Sha256::new();
     state.input(&system_entropy);
     state.input(&user_entropy);
-    
+
     let mut final_entropy: [u8; 32] = [0; 32];
     final_entropy.clone_from_slice(&double_sha256(&state.result()[..]));
 
     // ...which will we use to seed the RNG
     let mut rng = ChaChaRng::from_seed(final_entropy);
 
+    let cointype = match coin_type {
+        Some(s) => s,
+        None => params().cointype
+    };
+
     if !nohd {
-        // Allow HD addresses, so use only 1 seed        
+        // Allow HD addresses, so use only 1 seed
         let mut seed: [u8; 32] = [0; 32];
         rng.fill(&mut seed);
-        
-        return gen_addresses_with_seed_as_json(count, |i| (seed.to_vec(), i));
+
+        return gen_addresses_with_seed_as_json(count, |i| (seed.to_vec(), i), cointype, nobip39);
     } else {
-        // Not using HD addresses, so derive a new seed every time    
-        return gen_addresses_with_seed_as_json(count, |_| {            
-            let mut seed:[u8; 32] = [0; 32]; 
+        // Not using HD addresses, so derive a new seed every time
+        return gen_addresses_with_seed_as_json(count, |_| {
+            let mut seed:[u8; 32] = [0; 32];
             rng.fill(&mut seed);
-            
+
             return (seed.to_vec(), 0);
-        });
-    }    
+        }, cointype, nobip39);
+    }
 }
 
+/// Generate a series of `count` addresses and private keys from given seed phrase
+pub fn generate_wallet_from_seed_phrase(count: u32, phrase: String, coin_type: Option<u32>, nobip39: bool) -> String {
+
+    let phrase = match Mnemonic::from_phrase(phrase.clone(), Language::English) {
+        Ok(p) => p,
+        Err(_) => return json::stringify_pretty(object!{"result" => "Invalid Phrase" }, 2),
+    };
+
+    let mut seed: [u8; 32] = [0; 32];
+    seed.clone_from_slice(&phrase.entropy());
+
+    let cointype = match coin_type {
+        Some(s) => s,
+        None => params().cointype
+    };
+
+    return gen_addresses_with_seed_as_json(count, |i| (seed.to_vec(), i), cointype, nobip39);
+
+}
+
+/// Generate a series of `count` addresses and private keys from give HDSeed.
+pub fn generate_wallet_from_seed(count: u32, seed: Vec<u8>, coin_type: Option<u32>, nobip39: bool) -> String {
+
+    let cointype = match coin_type {
+        Some(s) => s,
+        None => params().cointype
+    };
+
+    return gen_addresses_with_seed_as_json(count, |i| (seed.clone(), i), cointype, nobip39);
+
+}
 /**
- * Generate `count` addresses with the given seed. The addresses are derived from m/32'/cointype'/index' where 
+ * Generate `count` addresses with the given seed. The addresses are derived from m/32'/cointype'/index' where
  * index is 0..count
- * 
+ *
  * Note that cointype is 1 for testnet and 133 for mainnet
- * 
- * get_seed is a closure that will take the address number being derived, and return a tuple cointaining the 
- * seed and child number to use to derive this wallet. 
+ *
+ * get_seed is a closure that will take the address number being derived, and return a tuple cointaining the
+ * seed and child number to use to derive this wallet.
  *
  * It is useful if we want to reuse (or not) the seed across multiple wallets.
  */
-fn gen_addresses_with_seed_as_json<F>(count: u32, mut get_seed: F) -> String 
+fn gen_addresses_with_seed_as_json<F>(count: u32, mut get_seed: F, coin_type: u32, nobip39: bool) -> String
     where F: FnMut(u32) -> (Vec<u8>, u32)
 {
     let mut ans = array![];
 
     for i in 0..count {
         let (seed, child) = get_seed(i);
-        let (addr, fvk, pk, path) = get_address(&seed, child);
+        let (addr, div, fvk, pk, path) = get_address(&seed, child, coin_type, nobip39);
         ans.push(object!{
                 "num"           => i,
                 "address"       => addr,
+                "diversified"   => div,
                 "viewing_key"   => fvk,
                 "private_key"   => pk,
                 "seed"          => path
-        }).unwrap(); 
-    }      
+        }).unwrap();
+    }
 
     return json::stringify_pretty(ans, 2);
 }
 
-/// Generate a standard ZIP-32 address from the given seed at 32'/44'/0'/index
-fn get_address(seed: &[u8], index: u32) -> (String, String, String, json::JsonValue) {
-    let spk: ExtendedSpendingKey = ExtendedSpendingKey::from_path(
-            &ExtendedSpendingKey::master(seed),
-            &[
-                ChildIndex::Hardened(32),
-                ChildIndex::Hardened(params().cointype),
-                ChildIndex::Hardened(index)
-            ],
-        );
-    let path = object!{
-        "HDSeed"    => hex::encode(seed),
-        "path"      => format!("m/32'/{}'/{}'", params().cointype, index)
-    };
+/// Generate a standard ZIP-32 address from the given seed at 32'/141'/0'/index
+fn get_address(seed: &[u8], index: u32, coin_type: u32, nobip39: bool) -> (String, json::JsonValue, String, String, json::JsonValue) {
+
+    let bip39seed = bip39::Seed::new(&Mnemonic::from_entropy(&seed, Language::English).unwrap(), "");
+
+    let mut spk: ExtendedSpendingKey;
+    let mut path = object!{"inital" => ""};
+
+    if nobip39 {
+        spk = ExtendedSpendingKey::from_path(
+                &ExtendedSpendingKey::master(seed),
+                &[
+                    ChildIndex::Hardened(32),
+                    ChildIndex::Hardened(coin_type),
+                    ChildIndex::Hardened(index)
+                ],
+            );
+
+        path = object!{
+            "Phrase"    => "Bip39 Disabled",
+            "HDSeed"    => hex::encode(seed),
+            "Bip39Seed" => "Bip39 Disabled",
+            "path"      => format!("m/32'/{}'/{}'", coin_type, index)
+        };
+    } else {
+        spk = ExtendedSpendingKey::from_path(
+                &ExtendedSpendingKey::master(bip39seed.as_bytes()),
+                &[
+                    ChildIndex::Hardened(32),
+                    ChildIndex::Hardened(coin_type),
+                    ChildIndex::Hardened(index)
+                ],
+            );
+
+        path = object!{
+            "Phrase"    => Mnemonic::from_entropy(&seed, Language::English).unwrap().phrase().to_string(),
+            "HDSeed"    => hex::encode(seed),
+            "Bip39Seed" => hex::encode(bip39seed.as_bytes()),
+            "path"      => format!("m/32'/{}'/{}'", coin_type, index)
+        };
+    }
+
+
+
 
     let encoded = encode_address(&spk);
+
+    let mut d: [u8; 11] = [0; 11];
+    let mut daddrs: Vec<String> = Vec::new();
+
+    let mut last_address: String = encode_address(&spk);
+    let mut diversified: String = encode_address(&spk);
+
+    loop {
+        if last_address != diversified {
+            daddrs.push(diversified.clone());
+            last_address = diversified.clone();
+            if daddrs.len() >= 5 {
+                break;
+            }
+        }
+        d[0] = d[0] + 1;
+        diversified = encode_diversified_address(&spk, &d);
+    }
+
+    let diversified_addrs = object!{
+        "d1"    => daddrs[0].clone(),
+        "d2"    => daddrs[1].clone(),
+        "d3"    => daddrs[2].clone(),
+        "d4"    => daddrs[3].clone(),
+        "d5"    => daddrs[4].clone()
+    };
+
     let encoded_pk = encode_privatekey(&spk);
 
     // Extended Full Viewing Key, aka Full Viewing Key.
@@ -384,7 +496,7 @@ fn get_address(seed: &[u8], index: u32) -> (String, String, String, json::JsonVa
     let fvk_base32: Vec<u5> = vfvk.to_base32();
     let encoded_fvk = Bech32::new(params().zviewkey_prefix.into(), fvk_base32).expect("bech32 failed (full viewing key)").to_string();
 
-    return (encoded, encoded_fvk, encoded_pk, path);
+    return (encoded, diversified_addrs, encoded_fvk, encoded_pk, path);
 }
 
 
@@ -405,11 +517,11 @@ mod tests {
         let hdseed_decoded = <[u8; 32]>::from_hex(hdseed).expect("Decoding failed");
         let expected_addr = "zs19qjkhwjzz03h4p3g0rca50tgeznuhzw9773m8ur64mtaqccyflgdhjsg0fgsxt0m3ljvs73rmc0";
         let expected_fvk = "zxviews1qvjtyprtqqqqpqyhjrw9eg0hhj7a3mfqae4vfnew6fmsj8a6qlssptk0n4lvz3dhk8p0uu6wvey6u479stpenfjjmsqf8udtjurx8d8ya4rj4l2pf4hxeg63ksf7rqtszg6chm7f00f4z9td7cn6a98sawm3u77hhlpqj6awq5zfjkfz97nmdtdrsdmz44murgm3ck3ra4ph4y9969js5vydh2xqe73z0zu6z2jydq9z2fzgfc5r0f7dyw9qkmw56wpccfc0lcrskmctxn48x";
-        let (addr, fvk, _, _) = get_address(&hdseed_decoded, 0);
+        let (addr, fvk, _, _) = get_address(&hdseed_decoded, 0, false);
         assert_eq!(addr, expected_addr);
         assert_eq!(fvk, expected_fvk);
     }
-    
+
     /**
      * Test the wallet generation and that it is generating the right number and type of addresses
      */
@@ -417,7 +529,7 @@ mod tests {
     fn test_wallet_generation() {
         use crate::paper::generate_wallet;
         use std::collections::HashSet;
-       
+
         // Mainnet wallet
         let w = generate_wallet(false, 1, &[]);
         let j = json::parse(&w).unwrap();
@@ -425,7 +537,7 @@ mod tests {
         assert!(j[0]["address"].as_str().unwrap().starts_with("zs"));
         assert!(j[0]["private_key"].as_str().unwrap().starts_with("secret-extended-key-main"));
         assert_eq!(j[0]["seed"]["path"].as_str().unwrap(), "m/32'/133'/0'");
-    
+
         // Check if all the addresses are the same
         let w = generate_wallet(false, 3, &[]);
         let j = json::parse(&w).unwrap();
@@ -456,7 +568,7 @@ mod tests {
     fn test_nohd() {
         use crate::paper::generate_wallet;
         use std::collections::HashSet;
-        
+
         // Check if all the addresses use a different seed
         let w = generate_wallet(true, 3, &[]);
         let j = json::parse(&w).unwrap();
@@ -484,12 +596,12 @@ mod tests {
     fn test_address_derivation(testdata: &str) {
         use crate::paper::gen_addresses_with_seed_as_json;
         let td = json::parse(&testdata.replace("'", "\"")).unwrap();
-        
+
         for i in td.members() {
             let seed = hex::decode(i["seed"].as_str().unwrap()).unwrap();
             let num  = i["num"].as_u32().unwrap();
 
-            let addresses = gen_addresses_with_seed_as_json(num+1, |child| (seed.clone(), child));
+            let addresses = gen_addresses_with_seed_as_json(num+1, |child| (seed.clone(), child, params().cointype, false));
 
             let j = json::parse(&addresses).unwrap();
             assert_eq!(j[num as usize]["address"], i["addr"]);
@@ -498,7 +610,7 @@ mod tests {
     }
 
     /*
-        Test data was derived from zcashd. It cointains 20 sets of seeds, and for each seed, it contains 5 accounts that are derived for the testnet and mainnet. 
+        Test data was derived from zcashd. It cointains 20 sets of seeds, and for each seed, it contains 5 accounts that are derived for the testnet and mainnet.
         We'll use the same seed and derive the same set of addresses here, and then make sure that both the address and private key matches up.
 
         To derive the test data, add something like this in test_wallet.cpp and run with
@@ -519,7 +631,7 @@ mod tests {
                                 .Derive(j | ZIP32_HARDENED_KEY_LIMIT);
 
                     auto rawSeed = seed.RawSeed();
-                    print_wallet(HexStr(rawSeed.begin(), rawSeed.end()), 
+                    print_wallet(HexStr(rawSeed.begin(), rawSeed.end()),
                                 EncodeSpendingKey(xsk), EncodePaymentAddress(xsk.DefaultAddress()), j);
                 }
             }
@@ -528,7 +640,7 @@ mod tests {
         TEST(WalletTests, SaplingAddressTest) {
             SelectParams(CBaseChainParams::TESTNET);
             gen_addresses();
-            
+
             SelectParams(CBaseChainParams::MAIN);
             gen_addresses();
         }

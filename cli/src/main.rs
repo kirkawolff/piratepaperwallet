@@ -8,8 +8,9 @@ use piratepaperlib::paper::*;
 use piratepaperlib::pdf;
 use std::io;
 use std::io::prelude::*;
+use hex;
 
-fn main() { 
+fn main() {
     let matches = App::new("piratepaperwallet")
        .version(version::version())
        .about("A command line Pirate Sapling paper wallet generator")
@@ -25,6 +26,10 @@ fn main() {
                 .short("n")
                 .long("nohd")
                 .help("Don't reuse HD keys. Normally, piratepaperwallet will use the same HD key to derive multiple addresses. This flag will use a new seed for each address"))
+       .arg(Arg::with_name("nobip39")
+                .short("b")
+                .long("nobip39")
+                .help("Disable creating and using a 64-byte Bip39seed and 24 word seed phrase"))
        .arg(Arg::with_name("output")
                 .short("o")
                 .long("output")
@@ -35,6 +40,16 @@ fn main() {
                 .long("entropy")
                 .takes_value(true)
                 .help("Provide additional entropy to the random number generator. Any random string, containing 32-64 characters"))
+        .arg(Arg::with_name("phrase")
+                .short("p")
+                .long("phrase")
+                .takes_value(true)
+                .help("Generate Wallet from 24 word seed phrase"))
+        .arg(Arg::with_name("hdseed")
+                .short("s")
+                .long("hdseed")
+                .takes_value(true)
+                .help("Generate Wallet from 32 byte hex HDSeed"))
         .arg(Arg::with_name("vanity_prefix")
                 .long("vanity")
                 .help("Generate a vanity address with the given prefix")
@@ -44,19 +59,30 @@ fn main() {
                 .help("Number of threads to use for the vanity address generator. Set this to the number of CPUs you have")
                 .takes_value(true)
                 .default_value("1"))
-       .arg(Arg::with_name("z_addresses")
-                .short("z")
-                .long("zaddrs")
-                .help("Number of Z addresses (Sapling) to generate")
+       .arg(Arg::with_name("BIP44CoinType")
+                .short("t")
+                .long("cointype")
+                .help("The Bip44 coin type used in the derivation path")
                 .takes_value(true)
-                .default_value("1")                
+                .default_value("141")
                 .validator(|i:String| match i.parse::<i32>() {
                         Ok(_)   => return Ok(()),
-                        Err(_)  => return Err(format!("Number of addresses '{}' is not a number", i))
+                        Err(_)  => return Err(format!("BIP44CoinType '{}' is not a number", i))
                 }))
-       .get_matches();  
-    
+        .arg(Arg::with_name("z_addresses")
+                 .short("z")
+                 .long("zaddrs")
+                 .help("Number of Z addresses (Sapling) to generate")
+                 .takes_value(true)
+                 .default_value("1")
+                 .validator(|i:String| match i.parse::<i32>() {
+                         Ok(_)   => return Ok(()),
+                         Err(_)  => return Err(format!("Number of addresses '{}' is not a number", i))
+                 }))
+       .get_matches();
+
     let nohd: bool    = matches.is_present("nohd");
+    let nobip39: bool    = matches.is_present("nobip39");
 
     // Get the filename and output format
     let filename = matches.value_of("output");
@@ -79,13 +105,38 @@ fn main() {
     }
 
     // Number of z addresses to generate
-    let z_addresses = matches.value_of("z_addresses").unwrap().parse::<u32>().unwrap();    
+    let z_addresses = matches.value_of("z_addresses").unwrap().parse::<u32>().unwrap();
+
+    let cointype = if !matches.value_of("BIP44CoinType").is_none() {
+        Some(matches.value_of("BIP44CoinType").unwrap().parse::<u32>().unwrap())
+    } else {
+        None
+    };
 
     let addresses = if !matches.value_of("vanity_prefix").is_none() {
+        if !matches.value_of("phrase").is_none() {
+            eprintln!("Incompatible options, vanity and seed phrase cannot be used together");
+            return;
+        }
+
+        if !matches.value_of("hdseed").is_none() {
+            eprintln!("Incompatible options, vanity and hdseed cannot be used together");
+            return;
+        }
+
         if z_addresses != 1 {
             eprintln!("Can only generate 1 zaddress in vanity mode. You specified {}", z_addresses);
             return;
         }
+
+        match cointype {
+            Some(s) => {
+                if s != 141 {
+                    eprintln!("Vanity mode will only run with Bip44CoinType 141, you specified {}", s);
+                    return;
+                }},
+            None => {}
+        };
 
         let num_threads = matches.value_of("threads").unwrap().parse::<u32>().unwrap();
 
@@ -101,6 +152,48 @@ fn main() {
 
         // return
         addresses
+
+    } else if !matches.value_of("phrase").is_none() {
+
+        if !matches.value_of("hdseed").is_none() {
+            eprintln!("Incompatible options, seed phrase and hdseed cannot be used together");
+            return;
+        }
+
+        let phrase = matches.value_of("phrase").unwrap().parse::<String>().unwrap();
+
+        print!("Generating {} Sapling addresses from seed phrase...", z_addresses);
+        io::stdout().flush().ok();
+        let addresses = generate_wallet_from_seed_phrase(z_addresses, phrase, cointype, nobip39);
+        println!("[OK]");
+
+        addresses
+
+    } else if !matches.value_of("hdseed").is_none() {
+
+        let phrase = matches.value_of("hdseed").unwrap().parse::<String>().unwrap();
+
+        print!("Generating {} Sapling addresses from HDSeed...", z_addresses);
+        io::stdout().flush().ok();
+
+        let seed = match hex::decode(phrase.clone()) {
+            Ok(s) => s,
+            Err(_) => {
+                println!("Invalid hex string - HDSeed");
+                return;
+            }
+        };
+
+        if seed.len() != 32 {
+            println!("Invalid HDSeed length");
+            return;
+        }
+
+        let addresses = generate_wallet_from_seed(z_addresses, seed, cointype, nobip39);
+        println!("[OK]");
+
+        addresses
+
     } else {
         // Get user entropy.
         let mut entropy: Vec<u8> = Vec::new();
@@ -120,7 +213,7 @@ fn main() {
 
         print!("Generating {} Sapling addresses...", z_addresses);
         io::stdout().flush().ok();
-        let addresses = generate_wallet(nohd, z_addresses, &entropy); 
+        let addresses = generate_wallet(nohd, z_addresses, &entropy, cointype, nobip39);
         println!("[OK]");
 
         addresses
@@ -145,5 +238,5 @@ fn main() {
                 eprintln!("{}", e);
             }
         };
-    }    
+    }
 }
