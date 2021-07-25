@@ -45,6 +45,10 @@ fn main() {
                 .long("phrase")
                 .takes_value(true)
                 .help("Generate Wallet from 24 word seed phrase"))
+        .arg(Arg::with_name("partialphrase")
+                .long("partialphrase")
+                .takes_value(true)
+                .help("Generate Wallet from 23 word partial seed phrase"))
         .arg(Arg::with_name("hdseed")
                 .short("s")
                 .long("hdseed")
@@ -114,6 +118,11 @@ fn main() {
     };
 
     let addresses = if !matches.value_of("vanity_prefix").is_none() {
+        if !matches.value_of("partialphrase").is_none() {
+            eprintln!("Incompatible options, vanity and partial seed phrase cannot be used together");
+            return;
+        }
+
         if !matches.value_of("phrase").is_none() {
             eprintln!("Incompatible options, vanity and seed phrase cannot be used together");
             return;
@@ -155,6 +164,11 @@ fn main() {
 
     } else if !matches.value_of("phrase").is_none() {
 
+        if !matches.value_of("partialphrase").is_none() {
+            eprintln!("Incompatible options, vanity and partial seed phrase cannot be used together");
+            return;
+        }
+
         if !matches.value_of("hdseed").is_none() {
             eprintln!("Incompatible options, seed phrase and hdseed cannot be used together");
             return;
@@ -170,6 +184,11 @@ fn main() {
         addresses
 
     } else if !matches.value_of("hdseed").is_none() {
+
+        if !matches.value_of("partialphrase").is_none() {
+            eprintln!("Incompatible options, vanity and partial seed phrase cannot be used together");
+            return;
+        }
 
         let phrase = matches.value_of("hdseed").unwrap().parse::<String>().unwrap();
 
@@ -190,6 +209,23 @@ fn main() {
         }
 
         let addresses = generate_wallet_from_seed(z_addresses, seed, cointype, nobip39);
+        println!("[OK]");
+
+        addresses
+
+    } else if !matches.value_of("partialphrase").is_none() {
+
+        let phrase = matches.value_of("partialphrase").unwrap().parse::<String>().unwrap();
+        let words: Vec<&str> = phrase.split(" ").collect();
+        if words.len() != 23 {
+            print!("Partial word list must be 23 words long!");
+            return;
+        }
+
+        print!("Attempting to {} Sapling addresses from partial seed phrase...", z_addresses);
+        io::stdout().flush().ok();
+
+        let addresses = generate_wallet_from_partial_seed_phrase(z_addresses, phrase, cointype, nobip39);
         println!("[OK]");
 
         addresses

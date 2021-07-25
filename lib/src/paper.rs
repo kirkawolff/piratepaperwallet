@@ -352,6 +352,71 @@ pub fn generate_wallet(nohd: bool, count: u32, user_entropy: &[u8], coin_type: O
     }
 }
 
+
+/// Generate a series of `count` addresses and private keys from given seed phrase
+pub fn generate_wallet_from_partial_seed_phrase(count: u32, phrase: String, coin_type: Option<u32>, nobip39: bool) -> String
+{
+    let mut ans = array![];
+    let lang_words = include_str!("english.txt");
+    let wordlist: Vec<&str> = lang_words.split_whitespace().collect();
+    let phraselist: Vec<&str> = phrase.split(" ").collect();
+
+    for wl in 0..2048 {
+        for pl in 0..24 {
+
+            let mut newlist: Vec<&str> = Vec::new();
+
+            io::stdout().flush().ok();
+            for nl in 0..24 {
+                if nl == pl {
+                    newlist.push(wordlist[wl]);
+                }
+
+                if nl < pl {
+                    newlist.push(phraselist[nl]);
+                }
+
+                if nl > pl {
+                    newlist.push(phraselist[nl - 1]);
+                }
+
+            }
+
+            let newphrase = newlist.join(" ");
+            match Mnemonic::from_phrase(newphrase.clone(), Language::English) {
+                Ok(p) => {
+
+                    let mut seed: [u8; 32] = [0; 32];
+                    seed.clone_from_slice(&p.entropy());
+
+                    let cointype = match coin_type {
+                        Some(s) => s,
+                        None => params().cointype
+                    };
+
+                    for i in 0..count {
+                        // let (seed, child) = get_seed(i);
+                        let (addr, div, fvk, pk, path) = get_address(&seed, i, cointype, nobip39);
+                        ans.push(object!{
+                                "num"           => i,
+                                "address"       => addr,
+                                "diversified"   => div,
+                                "viewing_key"   => fvk,
+                                "private_key"   => pk,
+                                "seed"          => path
+                        }).unwrap();
+                    }
+
+                },
+                Err(_) => (),
+            };
+        }
+    }
+
+    return json::stringify_pretty(ans, 2);
+
+}
+
 /// Generate a series of `count` addresses and private keys from given seed phrase
 pub fn generate_wallet_from_seed_phrase(count: u32, phrase: String, coin_type: Option<u32>, nobip39: bool) -> String {
 
