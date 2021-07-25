@@ -61,17 +61,18 @@ FLAGS:
     -V, --version    Prints version information
 
 OPTIONS:
-    -t, --cointype <BIP44CoinType>    The Bip44 coin type used in the derivation path [default: 141]
-    -e, --entropy <entropy>           Provide additional entropy to the random number generator. Any random string,
-                                      containing 32-64 characters
-    -f, --format <FORMAT>             What format to generate the output in: json or pdf [default: json]  [possible
-                                      values: pdf, json]
-    -s, --hdseed <hdseed>             Generate Wallet from 32 byte hex HDSeed
-    -p, --phrase <phrase>             Generate Wallet from 24 word seed phrase
-        --threads <threads>           Number of threads to use for the vanity address generator. Set this to the number
-                                      of CPUs you have [default: 1]
-        --vanity <vanity_prefix>      Generate a vanity address with the given prefix
-    -z, --zaddrs <z_addresses>        Number of Z addresses (Sapling) to generate [default: 1]
+    -t, --cointype <BIP44CoinType>         The Bip44 coin type used in the derivation path [default: 141]
+    -e, --entropy <entropy>                Provide additional entropy to the random number generator. Any random string,
+                                           containing 32-64 characters
+    -f, --format <FORMAT>                  What format to generate the output in: json or pdf [default: json]  [possible
+                                           values: pdf, json]
+    -s, --hdseed <hdseed>                  Generate Wallet from 32 byte hex HDSeed
+        --partialphrase <partialphrase>    Generate Wallet from 23 word partial seed phrase
+    -p, --phrase <phrase>                  Generate Wallet from 24 word seed phrase
+        --threads <threads>                Number of threads to use for the vanity address generator. Set this to the
+                                           number of CPUs you have [default: 1]
+        --vanity <vanity_prefix>           Generate a vanity address with the given prefix
+    -z, --zaddrs <z_addresses>             Number of Z addresses (Sapling) to generate [default: 1]
 
 ARGS:
     <output>    Name of output file.
