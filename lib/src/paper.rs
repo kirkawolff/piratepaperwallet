@@ -1,8 +1,9 @@
 use std::thread;
 use hex;
 use base58::{ToBase58};
-use bech32::{Bech32, u5, ToBase32};
-use rand::{Rng, ChaChaRng, FromEntropy, SeedableRng};
+use bech32::{self, u5, ToBase32};
+use rand::prelude::*;
+use rand_chacha::ChaCha20Rng;
 use json::{array, object};
 use sha2::{Sha256, Digest};
 use std::io;
@@ -110,7 +111,7 @@ fn encode_address(spk: &ExtendedSpendingKey) -> String {
     v.get_mut(..11).unwrap().copy_from_slice(&addr.diversifier.0);
     addr.pk_d.write(v.get_mut(11..).unwrap()).expect("Cannot write!");
     let checked_data: Vec<u5> = v.to_base32();
-    let encoded : String = Bech32::new(params().zaddress_prefix.into(), checked_data).expect("bech32 failed").to_string();
+    let encoded : String = bech32::encode(params().zaddress_prefix.into(), checked_data).expect("bech32 failed").to_string();
 
     return encoded;
 }
@@ -126,7 +127,7 @@ fn encode_diversified_address(spk: &ExtendedSpendingKey, d: &[u8; 11] ) -> Strin
     v.get_mut(..11).unwrap().copy_from_slice(&addr.diversifier.0);
     addr.pk_d.write(v.get_mut(11..).unwrap()).expect("Cannot write!");
     let checked_data: Vec<u5> = v.to_base32();
-    let encoded : String = Bech32::new(params().zaddress_prefix.into(), checked_data).expect("bech32 failed").to_string();
+    let encoded : String = bech32::encode(params().zaddress_prefix.into(), checked_data).expect("bech32 failed").to_string();
 
     return encoded;
 }
@@ -136,7 +137,7 @@ fn encode_privatekey(spk: &ExtendedSpendingKey) -> String {
     let mut vp = Vec::new();
     spk.write(&mut vp).expect("Can't write private key");
     let c_d: Vec<u5> = vp.to_base32();
-    let encoded_pk = Bech32::new(params().zsecret_prefix.into(), c_d).expect("bech32 failed").to_string();
+    let encoded_pk = bech32::encode(params().zsecret_prefix.into(), c_d).expect("bech32 failed").to_string();
 
     return encoded_pk;
 }
@@ -242,7 +243,7 @@ pub fn generate_vanity_wallet(num_threads: u32, prefix: String) -> Result<String
     };
 
     // Get 32 bytes of system entropy
-    let mut system_rng = ChaChaRng::from_entropy();
+    let mut system_rng = ChaCha20Rng::from_entropy();
 
     let (tx, rx) = mpsc::channel();
     let please_stop = Arc::new(AtomicBool::new(false));
@@ -308,12 +309,12 @@ pub fn generate_wallet(nohd: bool, count: u32, user_entropy: &[u8], coin_type: O
     #[cfg(feature = "systemrand")]
     {
         let result = panic::catch_unwind(|| {
-            ChaChaRng::from_entropy()
+            ChaCha20Rng::from_entropy()
         });
 
         let mut system_rng = match result {
             Ok(rng)     => rng,
-            Err(_e)     => ChaChaRng::from_seed([0; 32])
+            Err(_e)     => ChaCha20Rng::from_seed([0; 32])
         };
 
         system_rng.fill(&mut system_entropy);
@@ -328,7 +329,7 @@ pub fn generate_wallet(nohd: bool, count: u32, user_entropy: &[u8], coin_type: O
     final_entropy.clone_from_slice(&double_sha256(&state.result()[..]));
 
     // ...which will we use to seed the RNG
-    let mut rng = ChaChaRng::from_seed(final_entropy);
+    let mut rng = ChaCha20Rng::from_seed(final_entropy);
 
     let cointype = match coin_type {
         Some(s) => s,
@@ -559,7 +560,7 @@ fn get_address(seed: &[u8], index: u32, coin_type: u32, nobip39: bool) -> (Strin
     let mut vfvk: Vec<u8> = vec![];
     ExtendedFullViewingKey::from(&spk).write(&mut vfvk).expect("Should be able to write to a Vec");
     let fvk_base32: Vec<u5> = vfvk.to_base32();
-    let encoded_fvk = Bech32::new(params().zviewkey_prefix.into(), fvk_base32).expect("bech32 failed (full viewing key)").to_string();
+    let encoded_fvk = bech32::encode(params().zviewkey_prefix.into(), fvk_base32).expect("bech32 failed (full viewing key)").to_string();
 
     return (encoded, diversified_addrs, encoded_fvk, encoded_pk, path);
 }

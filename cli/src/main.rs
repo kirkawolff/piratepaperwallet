@@ -20,8 +20,7 @@ fn main() {
                 .help("What format to generate the output in: json or pdf")
                 .takes_value(true)
                 .value_name("FORMAT")
-                .possible_values(&["pdf", "json"])
-                .default_value("json"))
+                .possible_values(&["pdf", "json"]))
        .arg(Arg::with_name("nohd")
                 .short("n")
                 .long("nohd")
@@ -98,13 +97,9 @@ fn main() {
         return;
     }
 
-    // Get the filename and output format
-    let filename = matches.value_of("output");
-    let format   = matches.value_of("format").unwrap();
-
-    // Writing to PDF requires a filename
-    if format == "pdf" && filename.is_none() {
-        eprintln!("Need an output file name when writing to PDF");
+    // Writing to json requires a filename
+    if format == "json" && filename.is_none() {
+        eprintln!("Need an output file name when writing to json");
         return;
     }
 
@@ -256,13 +251,11 @@ fn main() {
     };
 
     // If the default format is present, write to the console if the filename is absent
-    if format == "json" {
-        if filename.is_none() {
-            println!("{}", addresses);
-        } else {
-            std::fs::write(filename.unwrap(), addresses).expect("Couldn't write to file!");
-            println!("Wrote {:?} as a plaintext file", filename);
-        }
+    if filename.is_none() {
+        println!("{}", addresses);
+    } else if format == "json" {
+        std::fs::write(filename.unwrap(), addresses).expect("Couldn't write to file!");
+        println!("Wrote {:?} as a plaintext file", filename);
     } else if format == "pdf" {
         // We already know the output file name was specified
         print!("Writing {:?} as a PDF file...", filename.unwrap());

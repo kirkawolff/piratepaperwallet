@@ -9,18 +9,20 @@ default = ["printpdf", "systemrand"]
 systemrand = []
 
 [dependencies]
-rand = "0.5"
-hex = "0.3"
-bech32 = "0.6"
-zcash_primitives = {  git = "https://github.com/zcash/librustzcash", rev = "5a48d179b8434a0318e7e19dda506e245a904092" }
-json = "0.11.14"
-qrcode = { version = "0.8", default-features = false }
-printpdf = { version = "0.3.2", optional = true }
-libsecp256k1 = "0.2.2"
-ripemd160 = "0.8.0"
-sha2 = "0.8.0"
+rand = "0.8.4"
+rand_chacha = "0.3.1"
+hex = "0.4.3"
+bech32 = "0.8.1"
+# zcash_primitives = {  git = "https://github.com/zcash/librustzcash", rev = "5a48d179b8434a0318e7e19dda506e245a904092" }
+zcash_primitives = {  git = "https://github.com/zcash/librustzcash", tag = "0.5.0" }
+json = "0.12.4"
+qrcode = { version = "0.12.0", default-features = false }
+printpdf = { version = "0.4.0", optional = true }
+libsecp256k1 = "0.6.0"
+ripemd160 = "0.9.1"
+sha2 = "0.9.5"
 base58 = "0.1.0"
-tiny-bip39 = "0.6.2"
+tiny-bip39 = "0.8.0"
 
 [dev-dependencies]
 array2d = "0.1.0"
